@@ -1,0 +1,214 @@
+---
+title: "DM - Modèle linéaire généralisé et Choix de modèles"
+author: "Marwen MEHREZ"
+date: "27 Aout 2019"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(lmtest)
+require(zoo)
+require(corrplot)
+require(car)
+library(readxl)
+library(MASS)
+```
+
+# Téléchargement, analyse et transformation des données :
+
+
+## Présentation des variables
+
+```{r data, echo=TRUE}
+meteo_train = read.csv(file = "meteo.train.csv", header = T, sep = ",") 
+meteo_test = read.csv(file = "meteo.test.csv", header = T, sep = ",")
+colnames(meteo_train)
+summary(meteo_train)
+
+```
+
+
+
+Les variables suivantes ne seront pas prises en compte dans la modélisation du phénomène :
+- X
+- Year
+- Day
+- Hour
+- Minute
+
+```{r dataanalysis, echo=TRUE, warning=FALSE}
+meteo_train = meteo_train[, - c(1,2,4,5,6)]
+```
+La variable "Month" est initialement de type de "numeric" (variable quantitative) :
+
+```{r datamonth, echo=TRUE, warning=FALSE}
+is.numeric(meteo_train$Month)
+```
+Dans la suite de modélisation, elle sera considérée comme une variable qualitative :
+```{r datamonth-factor, echo=TRUE, warning=FALSE}
+meteo_train$Month = as.factor(meteo_train$Month)
+is.factor(meteo_train$Month)
+```
+
+Ensuite la colinéarité des variables est analysée :
+```{r colinéarité, echo=TRUE}
+mcor = cor(meteo_train[,-1])
+
+```
+NB : la variable "Month" n'est pas à considérer car elle de type "factor".
+Au vu de la matrice de corrélation "mcor", certains variables sont fortement corrélées entre elles ce qui nécessite la suppression de ces variables. La valeur de 0.89 (0.9) est prise comme seuil, ceci permet de garantir un maximum VIF à 5.
+
+```{r seuil, echo = TRUE}
+cor_fort =which(mcor[,]>= 0.89 & mcor [,] <1)
+cor_fort  #identification des couples de variables fortement corrélées à travers la matrice de corrélation mcor
+mcor[cor_fort] # Visulisation des valeurs de corrélation
+```
+Suite à l'analyse de la colinéarité, les variables qui ne seront pas prises en compte dans la modélisation sont les suivantes :
+
+```{r, echo = FALSE, eval=FALSE}
+
+
+which(colnames(meteo_train)== "Low.Cloud.Cover.daily.mean..low.cld.lay.") 
+which(colnames(meteo_train)== "Sunshine.Duration.daily.sum..sfc.")
+which(colnames(meteo_train)== "Wind.Direction.daily.mean..10.m.above.gnd.") 
+which(colnames(meteo_train)== "Wind.Speed.daily.mean..80.m.above.gnd.") 
+which(colnames(meteo_train)== "Wind.Gust.daily.mean..sfc.") 
+which(colnames(meteo_train)== "Temperature.daily.max..2.m.above.gnd.") 
+which(colnames(meteo_train)== "Temperature.daily.min..2.m.above.gnd.") 
+which(colnames(meteo_train)== "Relative.Humidity.daily.min..2.m.above.gnd.") 
+which(colnames(meteo_train)== "Mean.Sea.Level.Pressure.daily.max..MSL.") 
+which(colnames(meteo_train)== "Mean.Sea.Level.Pressure.daily.min..MSL.") 
+which(colnames(meteo_train)== "Wind.Speed.daily.max..10.m.above.gnd.") 
+which(colnames(meteo_train)== "Wind.Speed.daily.min..10.m.above.gnd.") 
+which(colnames(meteo_train)== "Wind.Speed.daily.min..80.m.above.gnd.") 
+which(colnames(meteo_train)== "Wind.Speed.daily.max..900.mb.") 
+which(colnames(meteo_train)== "Wind.Speed.daily.min..900.mb.") 
+
+
+
+```
+
+```{r}
+Var_cor_fort = sort(c(15, 19, 37, 35, 39, 38, 24, 25, 10, 11, 14, 20, 21, 23, 34))
+colnames(meteo_train[,Var_cor_fort])
+```
+
+
+# Modélisation :
+Les variables Yi (Pluie.demain) à estimer suivent une loi binomiale (True, False), une régression logistique (glm) est à réaliser, la comparaison des modèles est réalisée à travers le critère AIC calculé avec la fonction (step).
+```{r}
+summary(meteo_train$pluie.demain)
+```
+toutes les données sont utilisées initialement pour déterminer les variables significatives du phénomène, ensuite, la base de données est divisée en données d'entraînement et de données de test afin de valider et vérifier la précision du modèle. 80 % des données sont utilisées pour l'entraînement contre 20% pour le test à chaque itération (5 itérations en total).
+
+```{r}
+meteo_train$sample = sample(c(1:5), nrow(meteo_train), replace = T, prob = c(0.2, 0.2, 0.2, 0.2, 0.2))
+summary(as.factor(meteo_train$sample))
+```
+
+
+Modèle 0 :  Régression de la variable (pluie.demain) en fonction des toutes les autres variables.
+
+```{r}
+
+regcomplet0 = step(glm(pluie.demain~.-1,data = meteo_train[,-Var_cor_fort], family = "binomial"), type = "both")
+```
+
+```{r}
+summary(regcomplet0)
+
+```
+Modèle 1 : Non considération de la variable "Relative.Humidity.daily.max..2.m.above.gnd." déclarée non significative à 5% par le modèle 0.
+
+```{r}
+regcomplet1 = step(glm(pluie.demain~.-1-Relative.Humidity.daily.max..2.m.above.gnd.,data = meteo_train[,-Var_cor_fort], family = "binomial"), type = "both")
+```
+```{r}
+summary(regcomplet1)
+```
+Modèle 2 : Non considération de la variable "Total.Cloud.Cover.daily.max..sfc" déclarée non significative à 5% par le modèle 1.
+
+```{r}
+regcomplet2 = step(glm(pluie.demain~.-1-Total.Cloud.Cover.daily.max..sfc.-Relative.Humidity.daily.max..2.m.above.gnd.,data = meteo_train[,-Var_cor_fort], family = "binomial"), type = "both")
+```
+```{r}
+summary(regcomplet2)
+```
+Modèle 3 : Non considération de la variable "High.Cloud.Cover.daily.mean..high.cld.lay." déclarée comme non significative à 5% par le modèle 2.
+```{r}
+regcomplet3 = step(glm(pluie.demain~.-1-High.Cloud.Cover.daily.mean..high.cld.lay.-Total.Cloud.Cover.daily.max..sfc.-Relative.Humidity.daily.max..2.m.above.gnd.,data = meteo_train[,-Var_cor_fort], family = "binomial"), type = "both")
+```
+
+```{r}
+summary(regcomplet3)
+```
+Modèle 4 : Non considération de la variable "Snowfall.amount.raw.daily.sum..sfc." déclarée comme non significative par le modèle 3.
+
+```{r}
+regcomplet4 = step(glm(pluie.demain~.-1-Snowfall.amount.raw.daily.sum..sfc.-High.Cloud.Cover.daily.mean..high.cld.lay.-Total.Cloud.Cover.daily.max..sfc.-Relative.Humidity.daily.max..2.m.above.gnd.,data = meteo_train[,-Var_cor_fort], family = "binomial"), type = "both")
+```
+
+
+```{r}
+summary(regcomplet4)
+```
+Le modèle retenu est le modèle 4, les variables suivantes sont significatives à 5 % :
+
+Month
+
+Mean.Sea.Level.Pressure.daily.mean..MSL.   
+Wind.Speed.daily.mean..10.m.above.gnd.     
+Wind.Direction.daily.mean..900.mb.          
+Total.Cloud.Cover.daily.min..sfc.           
+High.Cloud.Cover.daily.max..high.cld.lay.    
+Medium.Cloud.Cover.daily.max..mid.cld.lay.  
+Low.Cloud.Cover.daily.min..low.cld.lay.    
+Wind.Gust.daily.max..sfc. 
+
+##Validation croisée :
+
+les variables citées ce dessus seront utilisées pour expliquer le phénomène, les données utilisées seront ceux de l'échantillon "meteo_train$sample".On détermine le seuil de probabilité qui minimise l'erreur de prédiction, qui sera utilisé dans la prédiction de la variable "pluie.demain" des données de test "meteo_test".
+
+```{r}
+Erreur_opt = 0
+Seuil_opt =0
+E_opt = vector(mode = "numeric", length = 21)
+Erreur_opt = vector(mode = "numeric", length = 5)
+Seuil_opt = vector(mode = "numeric", length  = 5)
+J = seq(0,1, by = 0.05)
+
+for (i in 1:5)
+{
+reg_opt = step(glm(pluie.demain~-1+Month +Mean.Sea.Level.Pressure.daily.mean..MSL.+Wind.Speed.daily.mean..10.m.above.gnd.+Wind.Direction.daily.mean..900.mb. +Total.Cloud.Cover.daily.min..sfc.+High.Cloud.Cover.daily.max..high.cld.lay.+Medium.Cloud.Cover.daily.max..mid.cld.lay.+Low.Cloud.Cover.daily.min..low.cld.lay.+Wind.Gust.daily.max..sfc., family = "binomial", data = meteo_train[!(meteo_train$sample == i), -Var_cor_fort]), type = "backward")
+summary(reg_opt)
+
+k=0
+for (s in J)
+{
+pred = predict(reg_opt, meteo_train[(meteo_train$sample == i), ], type = "response")
+k = k+1
+pred = pred > s
+E_opt[k] = mean(abs(pred - meteo_train[(meteo_train$sample == i), "pluie.demain"]), na.rm = T)
+}
+
+Erreur_opt[i] = min(E_opt)
+Seuil_opt[i] = J[which.min(E_opt)]
+}
+Erreur = mean(Erreur_opt)
+Seuil = mean(Seuil_opt)
+Erreur
+Seuil
+
+```
+## Prédiction des données de test :
+```{r, warning=FALSE}
+meteo_test$Month = as.factor(meteo_test$Month)
+pred_test = predict(reg_opt, meteo_test, type = "response")
+x = pred_test > Seuil_opt
+meteo_test$Pluie.demain = x
+write.csv(meteo_test, file = "meteo.test.csv.csv")
+```
+
